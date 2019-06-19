@@ -6,9 +6,10 @@ from collections import defaultdict
 import random
 
 class Agent:
-    def __init__(self, env):
+    def __init__(self, env, features, featureExtractor):
         self.actions = [i for i in range(env.action_space.n)]
-        self.features = ['cartPos', 'cartVel', 'poleAng', 'poleVel']
+        self.features = features
+        self.featureExtractor = featureExtractor
         self.weights = defaultdict(float)
         self.initializeWeights()
         self.bestWeights = self.weights.copy()
@@ -24,13 +25,7 @@ class Agent:
         self.weights = self.bestWeights.copy()
 
     def extractFeatures(self, state, action):
-        featureVector = {}
-        actionVal = 1;
-        if action == 0:
-            actionVal = -1;
-        for i in range(len(self.features)):
-            featureVector[self.features[i]] = actionVal * state[i]
-        return featureVector
+        return self.featureExtractor(self.features, state, action)
 
     def getQ(self, state, action):
         featureVector = self.extractFeatures(state, action)
@@ -44,31 +39,64 @@ class Agent:
 
 def runEpisode(env, agent, render=False, numSteps=200):
     observation = env.reset()
-    for t in range(numSteps):
+    for timestep in range(numSteps):
         if render:
             env.render()
         action = agent.getAction(observation)
         observation, reward, done, info = env.step(action)
         if done:
-            timesteps = t + 1
-            #print("Episode finished after {} timesteps".format(timesteps))
+            #print("Episode finished after {} timesteps".format(timestep + 1))
             break
-    return timesteps
+        timesteps = timestep + 1
+        finalState = observation
+    return (timesteps, finalState)
 
+# Create environment, agent
 env = gym.make('CartPole-v1')
-agent = Agent(env)
+#features = ['cartPos', 'cartVel', 'poleAng', 'poleVel']
+features = ['poleAng', 'poleVel']
 
-bestTimesteps = 1
+def featureExtractor(features, state, action):
+    featureVector = {}
+    actionVal = 1;
+    if action == 0:
+        actionVal = -1;
+    for i in range(len(features)):
+        featureVector[features[i]] = actionVal * state[i+2]
+    return featureVector
+agent = Agent(env, features, featureExtractor)
+
+def calcCustomReward(timesteps, finalState):
+    return timesteps - 50 * abs(finalState[0]) - 10 * abs(finalState[1])
+
+# Train agent
+print("Training...")
+bestReward = 0
 for episode in range(200):
     agent.initializeWeights()
-    timesteps = runEpisode(env, agent)
-    if timesteps > bestTimesteps:
-        print(timesteps)
-        bestTimesteps = timesteps
+    timesteps, finalState = runEpisode(env, agent)
+    customReward = calcCustomReward(timesteps, finalState)
+    if customReward > bestReward:
+        bestReward = customReward
         agent.updateBestWeights()
+        print("Episode {}: {} timesteps, {} custom reward"
+                .format(episode, timesteps, customReward))
 
+print('-' * 60)
+
+# Test agent
+print("Testing...")
 agent.loadBestWeights()
-timesteps = runEpisode(env, agent, render=True)
-print(timesteps)
+avgTimesteps = 0
+avgCustomReward = 0
+for i in range(100):
+    timesteps, finalState = runEpisode(env, agent)
+    customReward = calcCustomReward(timesteps, finalState)
+    avgTimesteps = (avgTimesteps + timesteps) / (i + 1)
+    avgCustomReward = (avgCustomReward + customReward) / (i + 1)
+print("Average timesteps: {} Average custom reward: {}"
+        .format(timesteps, customReward))
 
+# Visual episode
+runEpisode(env, agent, render=True)
 env.close()
